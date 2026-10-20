@@ -388,3 +388,9 @@ internal/policy/   命令黑名单
 internal/xfer/     沙箱路径解析、原子写、删除/搬移
 internal/proto/    线格式 + 版本号
 ```
+
+# 其他说明
+- 页面效果图见`appimg`目录
+- <img src="https://gcore.jsdelivr.net/gh/dhjz/agent-remote-shell@master/appimg/app1.jpg" style="width: 340px;"/>
+
+- 项目地址: [https://github.com/dhjz/agent-remote-shell]( https://github.com/dhjz/agent-remote-shell)  
