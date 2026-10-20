@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>wr 日志 · 实时</title>
+<style>
+:root{
+  --acc:#0b7fc4; --ok:#1a7f37; --bad:#cf222e; --warn:#9a6700;
+  --r:7px;
+  --t:.15s;
+}
+/* 白天（默认） */
+html[data-theme=light]{
+  --bg:#f6f7f9; --panel:#fff; --panel2:#f0f2f5; --line:#e2e5ea;
+  --fg:#1f2328; --dim:#5b6472; --dim2:#8b95a3;
+  --code-bg:#f6f8fa; --code-fg:#24292f;
+  --head:rgba(246,247,249,.86);
+  --ok-bg:rgba(26,127,55,.12); --bad-bg:rgba(207,34,46,.12); --warn-bg:rgba(154,103,0,.13);
+  --acc-bg:rgba(11,127,196,.1);  --trow-bg:rgba(207,34,46,.05);
+  --sh:0 1px 2px rgba(16,22,26,.06);
+}
+/* 黑夜 */
+html[data-theme=dark]{
+  --bg:#0f1115; --panel:#161920; --panel2:#1c2029; --line:#272d38;
+  --fg:#e6e9ef; --dim:#949daf; --dim2:#6b7484;
+  --code-bg:#0b0d11; --code-fg:#c9d1d9;
+  --head:rgba(15,17,21,.86);
+  --ok-bg:rgba(63,185,80,.16); --bad-bg:rgba(248,81,73,.16); --warn-bg:rgba(210,153,34,.16);
+  --acc-bg:rgba(76,194,255,.14); --trow-bg:rgba(248,81,73,.06);
+  --sh:0 1px 2px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+button{font-family:inherit}
+
+/* ---------- 顶栏 ---------- */
+header{
+  position:sticky; top:0; z-index:20;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:8px 16px; background:var(--head);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.brand small{color:var(--dim2);font-weight:400;font-size:13px}
+.spacer{flex:1}
+input[type=search]{
+  background:var(--panel); border:1px solid var(--line); color:var(--fg);
+  padding:5px 10px; border-radius:6px; width:190px; outline:none; font-size:13px;
+  transition:border-color var(--t),width var(--t);
+}
+input[type=search]:focus{border-color:var(--acc); width:230px}
+input[type=search]::placeholder{color:var(--dim2)}
+.btn{
+  background:var(--panel); border:1px solid var(--line); color:var(--fg);
+  padding:5px 10px; border-radius:6px; cursor:pointer; font-size:13px;
+  transition:background var(--t),border-color var(--t),color var(--t);
+}
+.btn:hover{background:var(--panel2);border-color:var(--dim2)}
+#themeBtn{width:28px;height:26px;padding:0;display:grid;place-items:center;font-size:13px}
+
+/* ---------- 投放区 ---------- */
+#drop{
+  margin:16px; padding:44px 20px; text-align:center;
+  border:2px dashed var(--line); border-radius:12px;
+  background:var(--panel); cursor:pointer; transition:border-color var(--t),background var(--t);
+}
+#drop:hover,#drop.over{border-color:var(--acc);background:var(--acc-bg)}
+#drop h2{font-size:15px;font-weight:600;margin-bottom:6px}
+#drop p{color:var(--dim);font-size:13px}
+#drop kbd{
+  background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:4px;padding:0 5px;font-size:13px;color:var(--fg);
+}
+#drop.compact{padding:9px;margin:10px 16px}
+#drop.compact h2,#drop.compact p,#drop.compact .ico{display:none}
+#drop.compact::after{content:"拖入新文件以替换 · 点击选择";color:var(--dim);font-size:13px}
+
+/* ---------- 统计（单行紧凑） ---------- */
+.stats{display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px}
+.stat{
+  display:flex;align-items:baseline;gap:5px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:3px 9px;box-shadow:var(--sh);
+}
+.stat b{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat span{color:var(--dim2);font-size:13px}
+.stat.ok b{color:var(--ok)} .stat.bad b{color:var(--bad)} .stat.warn b{color:var(--warn)}
+
+/* ---------- 过滤 ---------- */
+.filters{display:flex;gap:5px;padding:0 16px 10px;flex-wrap:wrap}
+.chip{
+  background:var(--panel);border:1px solid var(--line);color:var(--dim);
+  padding:2px 9px;border-radius:99px;cursor:pointer;font-size:13px;
+  transition:background var(--t),border-color var(--t),color var(--t);
+}
+.chip:hover{color:var(--fg);border-color:var(--dim2)}
+.chip.on{background:var(--acc-bg);border-color:var(--acc);color:var(--acc);font-weight:600}
+
+/* ---------- 条目：两行 ---------- */
+main{padding:0 16px 32px;display:flex;flex-direction:column;gap:5px}
+.row{
+  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--dim2);
+  border-radius:var(--r);padding:6px 10px;box-shadow:var(--sh);
+  transition:background var(--t);
+  animation:in .18s ease both;
+}
+@keyframes in{from{opacity:0;transform:translateY(4px)}}
+.row:hover{background:var(--panel2)}
+/* 左边那条颜色就是结论：放行绿、被拦红、出错黄 */
+.row.allowed{border-left-color:var(--ok)}
+.row.blocked{border-left-color:var(--bad)}
+.row.error{border-left-color:var(--warn)}
+/* 坏行（服务端写了半行或手改过日志）：不是工具动作，单独一眼认出来 */
+.row.trow{background:var(--trow-bg)}
+
+/* 第一行：时间 工具 标签 来源 耗时 复制 */
+.l1{display:flex;align-items:center;gap:8px;min-width:0}
+.t{color:var(--dim2);font-size:13px;font-variant-numeric:tabular-nums;flex-shrink:0}
+.tool{font-weight:600;font-size:14px;white-space:nowrap}
+.tool .en{color:var(--dim2);font-weight:400;font-size:13px;margin-left:4px}
+.tag{
+  font-size:13px;padding:0 6px;border-radius:99px;font-weight:600;
+  white-space:nowrap;flex-shrink:0;line-height:19px;
+}
+.tag.allowed{background:var(--ok-bg);color:var(--ok)}
+.tag.blocked{background:var(--bad-bg);color:var(--bad)}
+.tag.error{background:var(--warn-bg);color:var(--warn)}
+.tag.other{background:var(--panel2);color:var(--dim)}
+.who{color:var(--dim2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dur{color:var(--dim2);font-size:13px;font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:auto}
+.cpy{
+  background:transparent;border:1px solid var(--line);color:var(--dim2);
+  padding:0 7px;border-radius:5px;cursor:pointer;font-size:13px;line-height:19px;
+  flex-shrink:0;opacity:0;transition:opacity var(--t),color var(--t),border-color var(--t);
+}
+.row:hover .cpy{opacity:1}
+.cpy:hover{color:var(--acc);border-color:var(--acc);background:var(--acc-bg)}
+.cpy.done{color:var(--ok);border-color:var(--ok);opacity:1}
+
+/* 第二行：命令 / 路径 */
+pre.cmd{
+  margin-top:3px;font-size:14px;color:var(--code-fg);line-height:1.5;
+  white-space:pre-wrap;word-break:break-word;font-family:inherit;
+}
+pre.cmd.c{
+  font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  background:var(--code-bg);border:1px solid var(--line);border-radius:5px;
+  padding:2px 7px;margin-top:4px;
+}
+pre.cmd.clamp{
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;cursor:pointer;
+}
+pre.cmd.clamp:hover{-webkit-line-clamp:unset;overflow:visible}
+.trow .bad{color:var(--bad);font-weight:600}
+
+/* 详情行：路径 / 目标 / 大小 / 原因 / 报错 / 会话
+   「原因」是服务器判它的理由，「报错」是命令自己说的那句话，两个都标红 */
+.det{display:flex;flex-wrap:wrap;gap:3px 6px;margin-top:4px;font-size:13px;align-items:baseline}
+.det .k{color:var(--dim2);flex-shrink:0}
+.det .v{
+  color:var(--code-fg);background:var(--code-bg);border:1px solid var(--line);
+  border-radius:5px;padding:0 6px;font-size:13px;
+  max-width:100%;word-break:break-all;
+}
+.det .v.bad{color:var(--bad);border-color:var(--bad);background:var(--bad-bg)}
+
+.empty-tip{text-align:center;color:var(--dim2);padding:36px 0;font-size:13px}
+.more{margin:4px auto 0}
+.hide{display:none !important}
+/* clip-path 隐藏：不可见但保留在无障碍树与自动化中，file input 需要 */
+#file{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+
+/* ---------- 提示 ---------- */
+#toast{
+  position:fixed;bottom:18px;left:50%;transform:translate(-50%,12px);
+  background:var(--panel);border:1px solid var(--line);color:var(--fg);box-shadow:var(--sh);
+  padding:7px 16px;border-radius:99px;font-size:13px;
+  opacity:0;pointer-events:none;transition:.2s;z-index:50;
+}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#toast.err{border-color:var(--bad);color:var(--bad)}
+
+/* ---------- 状态条 ---------- */
+#bar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin:12px 16px 0;padding:7px 11px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--sh);font-size:13px;
+}
+#bar .lead{font-weight:600}
+#bar .live{
+  display:inline-flex;align-items:center;gap:5px;color:var(--dim);
+  padding:0 7px;border:1px solid var(--line);border-radius:99px;line-height:19px;
+}
+#bar .live .pd{width:6px;height:6px;border-radius:50%;background:var(--dim2)}
+#bar .live.on{color:var(--ok);border-color:var(--ok)}
+#bar .live.on .pd{background:var(--ok);animation:pd 1.8s infinite}
+@keyframes pd{50%{opacity:.25}}
+#bar .live.watch{color:var(--acc);border-color:var(--acc)}
+#bar .live.watch .pd{background:var(--acc)}
+#bar .live.paused{color:var(--warn);border-color:var(--warn)}
+#bar .live.paused .pd{background:var(--warn)}
+#bar .off{color:var(--bad);border-color:var(--bad)}
+#bar .off .pd{background:var(--bad)}
+#bar .file{
+  color:var(--dim);max-width:34vw;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-size:13px;
+}
+#bar .spacer{flex:1}
+.lb{
+  background:transparent;border:1px solid var(--line);color:var(--dim);
+  padding:1px 8px;border-radius:99px;cursor:pointer;font-size:13px;line-height:19px;
+  transition:color var(--t),border-color var(--t),background var(--t);
+}
+.lb:hover{color:var(--fg);border-color:var(--dim2)}
+.lb.on{background:var(--acc-bg);border-color:var(--acc);color:var(--acc);font-weight:600}
+.lb[disabled]{opacity:.45;cursor:not-allowed}
+
+#drop{display:none}
+#drop.dev{display:block}
+#drop b{color:var(--acc)}
+</style>
+<style>
+/* ---------- 实时页专用 ---------- */
+#bar .addr{color:var(--dim2);font-size:13px;max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bar .live.recon{color:var(--warn);border-color:var(--warn)}
+#bar .live.recon .pd{background:var(--warn)}
+#bar .live.err{color:var(--bad);border-color:var(--bad)}
+#bar .live.err .pd{background:var(--bad)}
+#note{
+  margin:8px 16px 0;color:var(--dim2);font-size:13px;
+  display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;
+}
+#note code{background:var(--code-bg);border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--code-fg)}
+#note.bad{color:var(--bad)}
+#toast a{color:var(--acc)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><i class="dot"></i>wr 日志 <small id="fname">· 实时</small></div>
+  <div class="spacer"></div>
+  <input type="search" id="q" placeholder="搜索命令 / 工具 / 路径 / 模式 / 来源…">
+  <button class="btn" id="themeBtn" title="切换主题">🌙</button>
+  <button class="btn" id="pause" title="暂停刷新（连接保留，恢复后补齐）">暂停</button>
+  <button class="btn" id="copyAll">复制全部</button>
+  <button class="btn" id="reset" title="只清当前页面的列表，不动服务端日志">清屏</button>
+</header>
+
+<div id="bar">
+  <span class="live" id="live"><i class="pd"></i><span id="liveTxt">连接中</span></span>
+  <span class="addr mono" id="addr" title="数据来自 wr 服务端的 /log/stream"></span>
+  <span class="spacer"></span>
+  <button class="lb" id="follow" title="新条目到达时自动滚动到顶部">跟随 开</button>
+  <button class="lb" id="tail" title="切换只看最新 500 条 / 看全部历史">最新 500</button>
+</div>
+
+<div id="note"></div>
+
+<div class="stats hide" id="stats"></div>
+<div class="filters hide" id="filters"></div>
+
+<main id="list"><div class="empty-tip" id="tip">等待第一条日志…</div></main>
+
+<div id="toast"></div>
+<script>
+/* 字段以 wr 的审计日志为准（internal/audit）：一行一个 JSON，小驼峰。
+   time / decision{allowed,blocked,error} / tool / command / cwd / path / targets /
+   sessionId / reason / error / exitCode / durationMs / bytes / remote
+   数据走 GET /log/stream：text/plain 的可读流，按行 push，本身就是 SSE 的替代品
+   （EventSource 只认 text/event-stream，而这里要的只是一条不断行的管道）。
+   只留最新的 MAX 条：日志的价值在「刚刚发生了什么」，堆到几千条只会让页面卡。 */
+
+const MAX=500;
+const $=s=>document.querySelector(s);
+const listEl=$('#list'), statsEl=$('#stats'), filtersEl=$('#filters'), tip=$('#tip');
+
+/* 地址参数：?token= 会从 URL 学到并记住，?limit= 可改窗口大小 */
+const QS=new URLSearchParams(location.search);
+const TOKEN=QS.get('token')||localStorage.getItem('wr-token')||'';
+if(TOKEN) localStorage.setItem('wr-token',TOKEN);
+const LIMIT=Math.min(5000,Math.max(100,parseInt(QS.get('limit')||MAX,10)||MAX));
+
+let rows=[], view=[], flt='all', q='', shown=200;
+let paused=false, follow=true, tailMode=true, es=null, retry=0, offline=false;
+
+/* ---------- 中文映射：没有对应就回退原文 ---------- */
+/* 这套短名给筛选 chip 用，要能一眼扫过去；卡片里另有完整叫法 */
+const MAP={
+  tool:{
+    exec:'exec', job_start:'job_start', job_exit:'job_exit', job_kill:'job_kill',
+    write:'write', edit:'edit', delete:'delete', move:'move', mkdir:'mkdir',
+    put:'put', sync_apply:'sync_apply', log_clear:'log_clear',
+    read:'read', glob:'glob', grep:'grep', list:'list',
+  },
+  toolFull:{
+    exec:'执行命令',
+    job_start:'启动任务',
+    job_exit:'任务退出',
+    job_kill:'停止任务',
+    write:'写文件',
+    edit:'改文件',
+    delete:'删除',
+    move:'搬移',
+    mkdir:'建目录',
+    put:'上传',
+    sync_apply:'同步落盘',
+    log_clear:'清空日志',
+    read:'读文件',
+    glob:'找文件',
+    grep:'搜内容',
+    list:'列目录',
+  },
+  decision:{allowed:'放行',blocked:'拦截',error:'出错'},
+  role:{admin:'管理员',viewer:'只读',editor:'编辑',operator:'操作员',default:'默认'},
+  principal:{default:'默认'},
+};
+const zh=(kind,key)=>MAP[kind]?.[key] ?? key;
+
+/* ---------- 主题 ---------- */
+const SUN='☀️', MOON='🌙';
+function setTheme(t){
+  document.documentElement.dataset.theme=t;
+  $('#themeBtn').textContent = t==='dark' ? SUN : MOON;
+  $('#themeBtn').title = t==='dark' ? '切换到白天' : '切换到黑夜';
+}
+setTheme(localStorage.getItem('theme')==='dark' ? 'dark' : 'light');
+$('#themeBtn').onclick=()=>{
+  const t=document.documentElement.dataset.theme==='dark'?'light':'dark';
+  setTheme(t); localStorage.setItem('theme',t);
+};
+
+/* ---------- 解析 ---------- */
+/* 文件是旧在前；列表要新在前，所以整表倒序。新行直接用 unshift 插到头部。 */
+function sortRows(out){
+  return out.sort((a,b)=>{
+    const x=Date.parse(a.time||''), y=Date.parse(b.time||'');
+    if(isNaN(x)&&isNaN(y)) return 0;
+    if(isNaN(x)) return 1;
+    if(isNaN(y)) return -1;
+    return y-x;
+  });
+}
+
+function parseLine(line){
+  const s=line.trim();
+  if(!s) return null;
+  try{
+    const o=JSON.parse(s);
+    if(o&&typeof o==='object') return {ok:true,...o,_raw:s};
+  }catch{}
+  return {ok:false,_raw:s};
+}
+
+/* ---------- 复制 ---------- */
+async function copy(text){
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(text); return true;
+    }
+  }catch(e){}
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=text;
+    ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    const ok=document.execCommand('copy'); ta.remove(); return ok;
+  }catch(e){ return false; }
+}
+
+/* bytes 的含义随 tool 变，标签跟着改 */
+const EXTRA=[
+  ['path','路径'],['pattern','模式'],['targets','目标'],['bytes','大小'],['count','规模'],
+  ['reason','原因'],['error','报错'],
+  ['shell','终端'],['sessionId','会话'],['cwd','目录'],['remote','来源'],
+];
+/* count 的含义随 tool 变：read 是行数、grep 是命中处数、glob/list 是个数 */
+const CI={read:'行',glob:'个',grep:'处',list:'项'};
+const fmtCount=(r,n)=>`${n} ${CI[r.tool]||'条'}`;
+/* bytes 是字节数，标签只说「这堆字节是什么」，别带量词：
+   写「大小」，量词由 fmtBytes 的 B/KB/MB 给。曾经这里给 read/glob/grep/list
+   映射成 行/个/处/项，于是「405 B 项」——一个数带两个单位，
+   还把 count 的职责（几行、几个）抢了。 */
+const BI={exec:'输出',job_exit:'输出',write:'写入',edit:'写入',delete:'条目',put:'大小',sync_apply:'文件'};
+const fmtBytes=n=>{
+  if(typeof n!=='number') return String(n);
+  if(n<1024) return n+' B';
+  if(n<1048576) return (n/1024).toFixed(1)+' KB';
+  return (n/1048576).toFixed(1)+' MB';
+};
+/* shell 是实际跑命令的那个 profile：同一句 `Get-Content x` 在 pwsh 和 cmd 里
+   不是一回事，日志里不写清楚，事后只能靠猜。 */
+const SHELL_ZH={sh:'POSIX sh',bash:'bash',gitbash:'gitbash',wsl:'WSL bash',
+                pwsh:'PowerShell 7',powershell:'Windows PowerShell 5.1',cmd:'cmd'};
+const shellName=s=>SHELL_ZH[String(s).toLowerCase()]||String(s);
+const val=(r,k)=>{
+  if(k==='bytes') return fmtBytes(r[k])+(BI[r.tool]?' '+BI[r.tool]:'');
+  if(k==='count') return fmtCount(r,r[k]);
+  if(k==='shell') return shellName(r[k]);
+  return String(r[k]);
+};
+const extras=r=>EXTRA.filter(([k])=>r[k]!=null&&r[k]!==''&&!(Array.isArray(r[k])&&!r[k].length));
+
+function asText(r){
+  if(!r.ok) return r._raw;
+  const L=[`[${r.time||'-'}] ${r.tool||'-'} · ${r.decision||'-'}`+
+           (r.durationMs!=null?` · ${r.durationMs}ms`:'')];
+  const meta=[];
+  if(r.remote)    meta.push(`remote=${r.remote}`);
+  if(r.role)      meta.push(`role=${r.role}`);
+  if(r.principal) meta.push(`principal=${r.principal}`);
+  if(r.exitCode!=null) meta.push(`exitCode=${r.exitCode}`);
+  if(meta.length) L.push(meta.join(' '));
+  if(r.command) L.push('> '+r.command);
+  for(const [k,label] of extras(r)) L.push(`${label}: ${val(r,k)}`);
+  return L.join('\n');
+}
+
+let tt;
+function toast(msg,err){
+  const t=$('#toast');
+  t.innerHTML=msg; t.className='on'+(err?' err':'');
+  clearTimeout(tt); tt=setTimeout(()=>t.className='',2200);
+}
+
+/* ---------- 渲染 ---------- */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function fmtTime(t){
+  if(!t) return '-';
+  const d=new Date(t);
+  if(isNaN(d)) return t;
+  const p=n=>String(n).padStart(2,'0');
+  return `${p(d.getMonth()+1)}-${p(d.getDate())} `+
+         `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+const fmtDur=ms=>ms>=1000?(ms/1000).toFixed(ms>=10000?0:1)+'s':ms+'ms';
+
+const DEC=r=>String(r.decision||'').toLowerCase();
+const isBlocked=r=>r.ok&&DEC(r)==='blocked';
+const isError=r=>r.ok&&DEC(r)==='error';
+const isBad=r=>isBlocked(r)||isError(r);
+
+function card(r,i){
+  const d=document.createElement('div');
+
+  if(!r.ok){
+    d.className='row trow';
+    d.innerHTML=`<div class="l1">
+        <span class="t">#${i+1}</span>
+        <span class="bad">解析失败</span>
+        <span class="tag blocked">坏行</span>
+        <span class="dur"></span>
+        <button class="cpy">复制</button>
+      </div>
+      <pre class="cmd c">${esc(r._raw)}</pre>`;
+    bind(d,r); return d;
+  }
+
+  const dec=DEC(r)||'?';
+  const blocked=isBlocked(r), failed=isError(r);
+  const cmd=String(r.command??'');
+  const ex=extras(r);
+  const long=cmd.length>110;
+  const full=zh('toolFull',r.tool);
+  const hasCN=full!==r.tool;
+
+  const who=[];
+  if(r.role)      who.push(zh('role',r.role));
+  if(r.principal) who.push(zh('principal',r.principal));
+  if(r.remote)    who.push(r.remote);
+
+  const cls=blocked?'blocked':failed?'error':'allowed';
+  const tags=[`<span class="tag ${cls}">${esc(zh('decision',dec))}</span>`];
+  if(!isBad(r)&&r.exitCode!=null&&r.exitCode!==0)
+    tags.push(`<span class="tag error">退出码 ${esc(r.exitCode)}</span>`);
+
+  d.className='row '+cls;
+  d.innerHTML=
+    `<div class="l1">
+       <span class="t mono">${esc(fmtTime(r.time))}</span>
+       <span class="tool">${esc(hasCN?full:(r.tool||'?'))}`+
+         (hasCN?`<span class="en">${esc(r.tool)}</span>`:'')+`</span>`+
+         tags.join('')+
+         (who.length?`<span class="who">${esc(who.join(' · '))}</span>`:'')+
+         (r.durationMs!=null?`<span class="dur mono">${esc(fmtDur(r.durationMs))}</span>`:'<span class="dur"></span>')+
+         `<button class="cpy">复制</button>
+     </div>`+
+    (cmd?`<pre class="cmd${/\s/.test(cmd)?' c':''}${long?' clamp':''}">${esc(cmd)}</pre>`:'')+
+    (ex.length?`<div class="det">${ex.map(([k,label])=>
+        `<span class="k">${esc(label)}</span>`+
+        `<span class="v mono${k==='reason'||k==='error'?' bad':''}">`+
+        `${esc(k==='targets'?r[k].join(', '):val(r,k))}</span>`).join('')}</div>`:'');
+
+  const c=d.querySelector('.cmd');
+  if(c) c.onclick=()=>c.classList.toggle('clamp');
+  bind(d,r);
+  return d;
+}
+
+function bind(d,r){
+  const b=d.querySelector('.cpy');
+  if(!b) return;
+  b.onclick=async ev=>{
+    ev.stopPropagation();
+    if(await copy(asText(r))){
+      b.textContent='已复制'; b.classList.add('done');
+      setTimeout(()=>{b.textContent='复制';b.classList.remove('done')},1200);
+      toast('已复制');
+    }else toast('复制失败，请手动选择',true);
+  };
+}
+
+function render(){
+  listEl.innerHTML='';
+  statsEl.classList.toggle('hide',!rows.length);
+  filtersEl.classList.toggle('hide',!rows.length);
+
+  if(!rows.length){
+    tip.textContent=paused?'已暂停':'等待第一条日志…';
+    listEl.appendChild(tip); return;
+  }
+
+  const blocked=rows.filter(isBlocked).length;
+  const failed=rows.filter(isError).length;
+  const raw=rows.filter(r=>!r.ok).length;
+  const ds=rows.map(r=>r.durationMs).filter(v=>typeof v==='number');
+  const avg=ds.length?Math.round(ds.reduce((a,b)=>a+b,0)/ds.length):null;
+  const last=rows[0]?.time?fmtTime(rows[0].time):'-';
+
+  const S=[['总条目',rows.length,''],['放行',rows.length-blocked-failed-raw,'ok'],
+           ['拦截',blocked,blocked?'bad':''],['出错',failed,failed?'warn':''],
+           ['坏行',raw,raw?'bad':''],['平均',avg==null?'-':fmtDur(avg),''],
+           ['最新',last,'']];
+  statsEl.innerHTML=S.map(([k,v,c])=>
+    `<div class="stat ${c}"><b>${esc(v)}</b><span>${k}</span></div>`).join('');
+
+  const tools=[...new Set(rows.filter(r=>r.ok&&r.tool).map(r=>r.tool))].sort();
+  const F=[['all','全部',rows.length],['blocked','拦截',blocked],['error','出错',failed],
+           ['raw','坏行',raw],...tools.map(t=>['t:'+t,zh('tool',t),rows.filter(r=>r.ok&&r.tool===t).length])];
+  filtersEl.innerHTML=F.map(([k,l,n])=>
+    `<button class="chip${flt===k?' on':''}" data-k="${esc(k)}">${esc(l)} ${n}</button>`).join('');
+  filtersEl.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{flt=b.dataset.k;shown=200;render()});
+
+  const kw=q.toLowerCase();
+  view=rows.filter(r=>{
+    if(flt==='blocked'&&!isBlocked(r)) return false;
+    if(flt==='error'&&!isError(r)) return false;
+    if(flt==='raw'&&r.ok) return false;
+    if(flt.startsWith('t:')&&!(r.ok&&r.tool===flt.slice(2))) return false;
+    if(!kw) return true;
+    return r._raw.toLowerCase().includes(kw);
+  });
+
+  if(!view.length){
+    const e=document.createElement('div');
+    e.className='empty-tip'; e.textContent='没有匹配的条目';
+    listEl.appendChild(e); return;
+  }
+
+  const frag=document.createDocumentFragment();
+  view.slice(0,shown).forEach((r,i)=>frag.appendChild(card(r,i)));
+  listEl.appendChild(frag);
+
+  if(view.length>shown){
+    const b=document.createElement('button');
+    b.className='btn more';
+    b.textContent=`显示更多（还有 ${view.length-shown} 条）`;
+    b.onclick=()=>{shown+=200;render()};
+    listEl.appendChild(b);
+  }
+}
+
+/* ---------- 状态条 ---------- */
+const liveEl=$('#live'), liveTxt=$('#liveTxt');
+function setLive(cls,txt){ liveEl.className='live '+(cls||''); liveTxt.textContent=txt; }
+function renderBar(){
+  $('#follow').classList.toggle('on',follow);
+  $('#follow').textContent='跟随 '+(follow?'开':'关');
+  $('#pause').classList.toggle('on',paused);
+  $('#pause').textContent=paused?'继续':'暂停';
+  $('#tail').classList.toggle('on',tailMode);
+  $('#tail').textContent=tailMode?`最新 ${LIMIT}`:'全部';
+  $('#addr').textContent=`/log/stream · ${rows.length}/${LIMIT} 条`+
+    (tailMode?'':`（显示全部）`);
+}
+
+/* ---------- 追加 ---------- */
+/* 新行从头部进：列表是新的在上，用户视线也停在顶部 */
+function push(recs){
+  if(!recs.length) return;
+  const atTop=window.scrollY<=40;
+  rows=recs.concat(rows);
+  if(rows.length>Math.max(LIMIT,500)) rows=rows.slice(0,Math.max(LIMIT,500));
+  const keep=window.scrollY;
+  render(); renderBar();
+  if(follow && !q && flt==='all' && atTop) window.scrollTo({top:0,behavior:'auto'});
+  else window.scrollTo({top:keep,behavior:'auto'});
+}
+
+/* ---------- 接口：GET /log/stream ---------- */
+/* 服务端每 500ms 看一眼审计文件，有新行就 push；读到末尾就挂着，不关连接。
+   这里只负责把流按行切开，半行留到下一次——和 wr log -f 是同一套东西，
+   区别只是把「偏移」换成了浏览器自己的读指针。 */
+function headers(){
+  return TOKEN?{'Authorization':'Bearer '+TOKEN}:{};
+}
+
+function streamURL(after){
+  const u=new URL('/log/stream',location.origin);
+  if(after>0) u.searchParams.set('after',String(after));
+  u.searchParams.set('tail',String(LIMIT));
+  return u;
+}
+
+async function start(){
+  if(es) es.abort();
+  es=new AbortController();
+  const sig=es.signal;
+  setLive('recon','连接中');
+
+  const url=new URL('/log/stream',location.origin);
+  url.searchParams.set('tail',String(LIMIT));
+
+  let resp;
+  try{
+    resp=await fetch(url,{headers:headers(),signal:sig,cache:'no-store'});
+  }catch(e){
+    if(sig.aborted) return;
+    return schedule('连不上服务端：'+(e.message||e));
+  }
+  if(resp.status===401){
+    setLive('err','401 未授权');
+    $('#note').className='bad';
+    $('#note').innerHTML=`token 不对或没带。地址后面加 <code>?token=&lt;token&gt;</code>，`+
+      `token 在 <code>wr start</code> 的启动输出里。`;
+    return;
+  }
+  if(!resp.ok){
+    return schedule(`服务端返回 ${resp.status}`);
+  }
+  setLive('on','实时');
+  $('#note').className='';
+  $('#note').innerHTML='读写动作都记。只读的 <code>read</code> / <code>glob</code> / <code>grep</code> / <code>list</code>'+
+    '只留路径或模式加条数，不记返回内容。';
+  retry=0;
+
+  const reader=resp.body.getReader();
+  const dec=new TextDecoder();
+  let buf='';
+  try{
+    for(;;){
+      const {value,done}=await reader.read();
+      if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,nl);
+        buf=buf.slice(nl+1);
+        if(!line.trim()) continue;
+        const r=parseLine(line);
+        if(r && !paused) push([r]);
+      }
+    }
+    // 服务端按设计不会主动收线；走到这里说明它重启或断网了
+    if(!sig.aborted) schedule('连接已断开，正在重连…');
+  }catch(e){
+    if(!sig.aborted) schedule('连接中断：'+(e.message||e));
+  }
+}
+
+function schedule(msg){
+  setLive('recon','重连中');
+  const wait=Math.min(10000,500*Math.pow(2,Math.min(retry++,5)));
+  toast(esc(msg)+` ${(wait/1000).toFixed(1)}s`);
+  setTimeout(()=>{ if(!paused) start(); },wait);
+}
+
+/* ---------- 交互 ---------- */
+let qt;
+$('#q').oninput=e=>{
+  clearTimeout(qt);
+  qt=setTimeout(()=>{q=e.target.value.trim();shown=200;render()},160);
+};
+
+$('#copyAll').onclick=async()=>{
+  if(!view.length) return toast('没有可复制的内容',true);
+  if(await copy(view.map(asText).join('\n---\n'))) toast(`已复制 ${view.length} 条`);
+  else toast('复制失败，请手动选择',true);
+};
+
+/* 清屏只清本地：服务端日志不归浏览器管，要清空得用 wr log -clear */
+$('#reset').onclick=()=>{
+  rows=[]; view=[]; render(); renderBar();
+  toast('已清屏（不影响服务端日志）');
+};
+
+$('#pause').onclick=()=>{
+  paused=!paused;
+  renderBar();
+  if(paused) setLive('paused','已暂停');
+  else { setLive('on','实时'); if(!es||es.signal.aborted) start(); else restart(); }
+};
+
+/* 继续时重连一次，把暂停期间错过的行补齐（tail 语义天然幂等） */
+function restart(){ if(es) es.abort(); start(); }
+
+$('#follow').onclick=()=>{
+  follow=!follow; renderBar();
+  if(follow) window.scrollTo({top:0,behavior:'smooth'});
+};
+
+$('#tail').onclick=()=>{
+  tailMode=!tailMode;
+  rows=[]; render(); renderBar(); restart();
+  toast(tailMode?`只看最新 ${LIMIT} 条`: '从头拉全部（可能很多）');
+};
+
+/* ---------- 启动 ---------- */
+renderBar();
+start();
+
+/* 每次渲染顺手刷状态条 */
+const _render=render; render=function(){ _render(); renderBar(); };
+render();
+</script>
+</body>
+</html>

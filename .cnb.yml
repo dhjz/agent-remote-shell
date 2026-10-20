@@ -1,0 +1,80 @@
+# 流水线：推送 Tag 时交叉编译三平台产物，建 Release 并上传附件。
+#
+# 版本号只有一处来源：Tag 名去掉可选的 v 前缀。
+# 每个用到它的脚本现场用 shell 参数展开算一次——不落文件、不靠 env 传递
+# （平台对 env 的值不做变量替换，内置任务的 options 也不做 shell 展开）。
+$:
+  tag_push:
+    - docker:
+        image: golang:1.23
+      stages:
+        - name: 构建 linux_amd64
+          script: |
+            set -eu
+            VERSION="${CNB_BRANCH#v}"
+            case "$VERSION" in
+              *'${'*|*'$('*|*'`'*) echo "版本号非法: $VERSION" >&2; exit 1 ;;
+            esac
+            export CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+            go build -trimpath \
+              -ldflags "-s -w -X cnb.cool/yyx946/tteist/internal/proto.Version=${VERSION}" \
+              -o wr ./cmd/wr
+            tar -czf "wr_${VERSION}_linux_amd64.tar.gz" wr
+            rm -f wr
+            tar -tzf "wr_${VERSION}_linux_amd64.tar.gz"
+        - name: 构建 linux_arm64
+          script: |
+            set -eu
+            VERSION="${CNB_BRANCH#v}"
+            export CGO_ENABLED=0 GOOS=linux GOARCH=arm64
+            go build -trimpath \
+              -ldflags "-s -w -X cnb.cool/yyx946/tteist/internal/proto.Version=${VERSION}" \
+              -o wr ./cmd/wr
+            tar -czf "wr_${VERSION}_linux_arm64.tar.gz" wr
+            rm -f wr
+            tar -tzf "wr_${VERSION}_linux_arm64.tar.gz"
+        - name: 构建 windows_amd64
+          script: |
+            set -eu
+            VERSION="${CNB_BRANCH#v}"
+            # 用系统 zip 打包，不再 go run 自写工具：后者会被 GOOS=windows 一起交叉编译，
+            # 编出 mkzip.exe 在构建机上 exec format error。先把 GOOS/GOARCH 收回来再装包。
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+              go build -trimpath \
+                -ldflags "-s -w -X cnb.cool/yyx946/tteist/internal/proto.Version=${VERSION}" \
+                -o wr.exe ./cmd/wr
+            export CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+            # golang:1.23 镜像自带 zip；万一没带就地补装，别让打包卡在缺命令上。
+            command -v zip >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq zip)
+            zip -q "wr_${VERSION}_windows_amd64.zip" wr.exe
+            rm -f wr.exe
+            unzip -l "wr_${VERSION}_windows_amd64.zip"
+        - name: 校验版本号已注入
+          script: |
+            set -eu
+            VERSION="${CNB_BRANCH#v}"
+            # 版本号要同时到得了命令行和 /info：两处都从 proto.Version 取，
+            # 这里只验这条链路没断。
+            CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X cnb.cool/yyx946/tteist/internal/proto.Version=${VERSION}" \
+              -o wr ./cmd/wr
+            ver="$(./wr version)"
+            echo "$ver"
+            [ "$ver" = "wr ${VERSION}" ]
+            rm -f wr
+            ls -lh ./wr_*
+        # tag_push 只创建 Tag，不创建 Release；上传附件要求先有 Release，否则 404。
+        # overlying 必须为 false（先删后建），否则 Release 不存在时会被静默跳过。
+        # title 不写：默认取 Tag 名，正是我们要的版本号。
+        - name: 创建 Release
+          type: git:release
+          options:
+            overlying: false
+            latest: true
+        # 附件名里的版本号来自 Tag，不含 ${}，不会被平台二次插值。
+        - name: 上传 Release 附件
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - ./wr_*.tar.gz
+              - ./wr_*.zip

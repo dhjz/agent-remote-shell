@@ -1,0 +1,5 @@
+# 构建产物
+/wr
+/wr.exe
+/dist/
+*.log
